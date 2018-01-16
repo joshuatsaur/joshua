@@ -1,0 +1,17 @@
+資料庫-->設定資料來源位置
+
+連線URL:        jdbc:oracle:thin:@twisdd02.tw.jpmorganchase.com:1521:lredb
+資料庫類別名稱: oracle.jdbc.driver.OracleDriver
+連線名稱:       jdbc/LREDS
+ID/PWD:         imlre/imlre123
+
+
+
+
+JDBC驅動程式的設定:
+JDBC驅動程式是在C:\sql developer\jdbc\lib\ojdbc14.jar
+要執行此驅動程式必須修改C:\Program Files\Common Files\Business Objects\3.0\java\CRConfig.xml
+<Classpath> --> 加 C:\sql developer\jdbc\lib\ojdbc14.jar
+
+
+

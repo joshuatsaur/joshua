@@ -1,0 +1,25 @@
+DBO:
+DROP SEQUENCE LRE_DBO_TWN.MM_DEAL_SEQ
+
+CREATE SEQUENCE LRE_DBO_TWN.MM_DEAL_SEQ
+  START WITH 23940
+  MAXVALUE 999999999999
+  MINVALUE 1
+  NOCYCLE
+  CACHE 20
+  NOORDER;
+
+APP:
+DROP SYNONYM LRE_APP_TWN.MM_DEAL_SEQ;
+
+CREATE SYNONYM LRE_APP_TWN.MM_DEAL_SEQ FOR LRE_DBO_TWN.MM_DEAL_SEQ;
+
+DBO:
+GRANT SELECT ON MM_DEAL_SEQ TO lre_app_twn
+
+
+=============================================================================
+
+alter sequence LRE_DBO_TWN.interface_setting_seq increment by 455754;
+select interface_setting_seq.nextval from dual;
+alter sequence LRE_DBO_TWN.interface_setting_seq increment by 1;

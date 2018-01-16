@@ -1,0 +1,57 @@
+select l.session_id sid,
+l.locked_mode lockmode,
+l.oracle_username db_user,
+l.os_user_name os_user,
+s.machine,
+s.schemaname,
+o.object_name tablename,
+q.sql_text
+from v$locked_object l, v$session s, v$sql q, all_objects o
+where l.session_id=s.sid and
+s.type='USER' and
+s.sql_address=q.address and
+l.object_id=o.object_id 
+
+
+
+查看目前的 session
+select sid from v$session where audsid=userenv('SESSIONID');
+
+
+查看該 session 等待時間
+select event, seconds_in_wait, sid from v$session_wait where sid in (146);
+
+解鎖
+alter system kill session '146';
+
+or 
+
+alter user LRE_APP_TWN account unlock;
+
+***check oracle id 有沒有被Lock
+select * from dba_users where username='LRE_APP_TWN'
+
+***解Lock:
+alter user LRE_APP_TWN account unlock
+
+
+
+
+
+================================================================================================
+查Table Lock
+
+-- search lock
+select * from v$locked_object
+select
+a.object_id, a.session_id, a.oracle_username, a.os_user_name,
+b.owner, b.object_name
+from 
+v$locked_object a 
+inner join all_objects b on a.object_id = b.object_id
+
+-- kill lock
+select * from v$session where sid in(120)
+alter system kill session '120,46161'
+
+

@@ -1,0 +1,125 @@
+--Check all Table/View/Sequence/Function 權限
+select
+priv.grantee, priv.owner, obj.object_type, priv.table_name, priv.grantor, priv.privilege
+from
+dba_tab_privs priv
+inner join all_objects obj on priv.table_name = obj.object_name
+where
+priv.owner in ('LRE_DBO_TWN')
+and obj.object_type in ('TABLE', 'VIEW', 'SEQUENCE', 'FUNCTION')
+order by
+priv.grantee, priv.owner, obj.object_type, priv.table_name, priv.privilege;
+
+
+--Check 所有Sequence Number是否正確
+SELECT sequence_name, last_number curr_val, increment_by,
+last_number + Increment_by next_val
+FROM user_sequences;
+
+
+--Check所有 SYNONYM
+SELECT synonym_name FROM Dba_Synonyms where owner = 'LRE_APP_TWN';
+
+
+--一次找出所有table的筆數
+SELECT table_name,
+to_number(extractvalue (xmltype
+(dbms_xmlgen.getxml
+('select count(*) c from '||table_name)),'/ROWSET/ROW/C')) nbr_lines
+FROM user_tables
+ORDER BY 1;
+
+
+
+
+--table space
+SELECT A.TABLESPACE_NAME TABLESPACE,
+       AVG(B.TTL) TOTAL,
+       AVG(B.TTL)-SUM(A.BYTES)/1024 USED,
+       SUM(A.BYTES)/1024 FREE,
+       (AVG(B.TTL)-SUM(A.BYTES)/1024)/AVG(B.TTL)*100 USED_RATIO
+  FROM DBA_FREE_SPACE A ,
+       (SELECT TABLESPACE_NAME,SUM(BYTES/1024) TTL
+          FROM DBA_DATA_FILES
+         GROUP BY TABLESPACE_NAME) B
+ WHERE A.TABLESPACE_NAME = B.TABLESPACE_NAME
+ GROUP BY A.TABLESPACE_NAME
+ 
+
+--table info
+ SELECT
+  C.OWNER, C.TABLE_NAME, C.COLUMN_ID, C.COLUMN_NAME, 
+  DATA_TYPE, DATA_LENGTH, DATA_PRECISION, DATA_DEFAULT, 
+  NULLABLE, COMMENTS
+FROM
+  ALL_TAB_COLUMNS C 
+JOIN ALL_TABLES T ON 
+  C.OWNER = T.OWNER AND C.TABLE_NAME = T.TABLE_NAME
+LEFT JOIN ALL_COL_COMMENTS R ON
+  C.OWNER = R.Owner AND 
+  C.TABLE_NAME = R.TABLE_NAME AND 
+  C.COLUMN_NAME = R.COLUMN_NAME
+WHERE  
+  C.OWNER  = 'LRE_DBO_TWN' 
+ORDER BY C.TABLE_NAME, C.COLUMN_ID
+
+
+--index info
+SELECT 
+  I.TABLE_OWNER, I.TABLE_NAME, I.INDEX_NAME, I.INDEX_TYPE,
+  I.UNIQUENESS, C.COLUMN_POSITION, C.COLUMN_NAME, C.DESCEND
+FROM 
+  ALL_INDEXES I JOIN ALL_IND_COLUMNS C
+ON 
+  I.TABLE_OWNER = C.TABLE_OWNER AND
+  I.INDEX_NAME = C.INDEX_NAME
+WHERE
+  C.TABLE_OWNER = 'LRE_DBO_TWN'
+ORDER BY I.TABLE_NAME, I.INDEX_NAME, COLUMN_POSITION
+
+
+
+
+--primary key info
+SELECT 
+  C.OWNER, C.TABLE_NAME, D.POSITION, D.COLUMN_NAME  
+FROM 
+  ALL_CONSTRAINTS C JOIN ALL_CONS_COLUMNS D
+ON
+  C.OWNER = D.OWNER AND
+  C.CONSTRAINT_NAME = D.CONSTRAINT_NAME
+WHERE
+  C.CONSTRAINT_TYPE = 'P' AND C.OWNER = 'LRE_DBO_TWN'
+ORDER BY C.TABLE_NAME, D.POSITION
+
+
+--views info
+select   *   from   dba_views where OWNER = 'LRE_DBO_TWN'
+
+
+--sequence info
+select   *   from   dba_sequences where sequence_OWNER = 'LRE_DBO_TWN'
+
+
+
+
+
+select
+    table_name,
+    index_name,
+    column_name,
+    column_position
+from
+    sys.all_ind_columns
+where
+    table_name = 'OES_ORDER' and
+    table_owner = 'LRE_DBO_TWN';
+
+
+
+
+
+
+--DISABLE CONSTRAINTS
+SELECT 'ALTER TABLE ' || table_name || ' ' || 'DISABLE CONSTRAINT ' || constraint_name || ';' from all_constraints where r_constraint_name = 'PK_PARTY_ADDED' and status = 'ENABLED';
+SELECT * from all_constraints where r_constraint_name = 'FK_BANK_CRED_PARTY_ADDED' and status = 'ENABLED';
