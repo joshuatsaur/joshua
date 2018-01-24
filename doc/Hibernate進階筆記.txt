@@ -1,0 +1,115 @@
+八、hibernate的inverse屬性的作用？
+
+在Hibernate中，術語inverse是反轉的意思，在關聯關係中，inverse=」false」為主控方，由主控方負責維護對象的關聯關係。
+
+inverse 決定是否把對對象中集合的改動反映到資料庫中，所以inverse只對集合起作用，也就是只對one-to-many或many-to-many有效（因 為只有這兩種關聯關係包含集合，而one-to-one和many-to-one只含有關係對方的一個引用，注意一般只在雙向關聯時才有需要設置inverse）。
+
+（1）、一對多：
+
+通常會在的one一方放棄對多的關係的維護，這樣效率會高起來（如老師記住每位學生是件困難的事情，效率是很低的，所以乾脆就不記了，這關係由學生來維護，學生記住一位老師是很容易）
+
+所以應該在一方的設置 inverse=true ，多的一方設置 inverse=false（多的一方也可以不設置inverse屬性，因為默認值是false），這說明關聯關係由多的一方來維護。
+
+如果要一方維護關係，就會使在插入或是刪除」一」方時去update」多」方的每一個與這個」一」的對象有關係的對象。
+
+而如果讓」多」方面維護關係時就不會有update操作，因為關係就是在多方的對象中的，直指插入或是刪除多方對象就行了。
+
+顯然這樣做的話，會減少很多操作，提高了效率。
+
+註：單向one-to-many關聯關係中，不可以設置inverse=」true」,因為被控方的映射文件中沒有主控方的信息。
+
+（2）、多對多： 屬性在獨立表中。inverse屬性的默認值為false。在多對多關聯關係中，關係的兩端 inverse不能都設為false,即默認的情況是不對的，如果都設為false,在做插入操作時會導致在關係表中插入兩次關係。也不能都設為 true，如果都設為true,任何操作都不會觸發對關係表的操作。因此在任意一方設置inverse=true，另一方inverse=false。
+
+九、hibernate的cascade屬性的作用？
+
+cascade屬性的作用是描述關聯對象進行操作時的級聯特性。因此，只有涉及到關係的元素才有cascade屬性。
+
+具 有cascade屬性的標記包括<many-to-one /> <one-to-one /> <any /> <set /><bag /> <idbag /> <list /> <array />
+
+注意：<ont-to-many />和 <many-to-many />是用在集合標記內部的，所以是不需要cascade屬性的。
+
+級聯操作：指當主控方執行某項操作時，是否要對被關聯方也執行相同的操作。
+
+十、各種關聯關係下的lazy懶加載區別？
+
+1、one-to-one懶加載
+
+一對一的懶加載並不常用，因為懶加載的目的是為了減少與資料庫的交互，從而提高執行效率，而在一對一關係中，主表中的每一條數據只對應從表的一條資料庫，就算都查詢也不會增加多少交互的成本，而且主表不能有contrained=true，所以主表是不能懶加載的。但是從表可以有。
+
+實現此種懶加載必須在從對象這邊同時滿足三個條件：
+
+1、lazy!=false（lazy的屬性有三個選項分別為：no-proxy、false和proxy）
+
+2、Constrained = true ；
+
+3、fetch=select。
+
+註：當fetch設置為join時，懶加載就會失效。因為fetch的作用是抓取方式，他有兩個值分別為select和join，默認值為select。即在設為join時，他會直接將從表信息以join方式查詢到而不是再次使用select查詢，這樣導致了懶加載的失效。
+
+2、one-to-many懶加載
+
+與one-to-one關聯不同，對one-to-many而言，主表的每一條屬性都會對應從表的多條數據，這個時候懶加載就顯得非常有效了。比如一個部門裡面有多個員工，如果沒有懶加載，每查詢這個部門的時候都會查詢出多個員工，這會大大增加與資料庫交互的成本。所以Hbernate默認的是加入懶加載的。這就是查詢集合屬性的時候返回的是一個PersistentIndexed*類型對象的原因。該對象其實就是一個代理對象。當然，可以在映射文件中通過將lazy屬性設為假來禁用。
+
+Hibernate默認對one-to-many就是使用的懶加載，但用戶也可以取消懶加載操作：
+
+一：設置lazy=」false」;
+
+二：設置fetch=」join」.
+
+實現此種懶加載必須在從對象這邊同時滿足兩個條件：
+
+1、lazy!=false（lazy的屬性有三個選項分別為：no-proxy、false和proxy）
+
+2、fetch=select。
+
+3、many-to-one懶加載
+
+此關聯關係的懶加載和one-to-one的懶加載一樣都是可要可不要的，因為對執行效率的提高都不是非常明顯。雖然多對一與一對一關係方式相同，但是在Hibernate中多對一時，默認是進行懶加載的。另外有一點需要注意的是懶加載並不會區分集合屬性裡面是否有值，即使是沒有值，他依然會使用懶加載。
+
+實現此種懶加載必須在從對象這邊同時滿足兩個條件
+
+1、lazy!=false（lazy的屬性有三個選項分別為：no-proxy、false和proxy）
+
+2、fetch=select
+
+4、many-to-many懶加載
+
+此關聯關係的懶加載和one-to-many的懶加載一樣對程序的執行效率的提高都是非常明顯的。
+
+實現此種懶加載必須在從對象這邊同時滿足兩個條件：
+
+1、lazy!=false（lazy的屬性有三個選項分別為：no-proxy、false和proxy）
+
+2、fetch=select
+
+能夠懶加載的對象都是被改過的代理對象，當相應的對象沒有關閉時，訪問這些懶加載對象的屬性（getId和getClass除外）Hibernate會初始化這些代理，或用hibernate.initalize(proxy)來初始化代理對象；當關閉session後在訪問懶加載的對象就會出現異常。
+
+十一、hibernate中lazy的使用中的區別？
+
+Lazy的有效期：只有在session打開的時候才有效；session關閉後lazy就沒效了。
+
+lazy策略可以用在：
+
+◆ <class>標籤上：可以取值true/false
+
+◆<property>標籤上，可以取值true/false，這個特性需要類增強
+
+◆<set>/<list>等集合上，可以取值為true/false/extra
+
+◆<one-to-one>/<many-to-one>等標籤上，可以取值false/proxy/no-proxy
+
+6.1 get和load的區別：
+
+◆get不支持延遲加載，而load支持。
+
+◆當查詢特定的資料庫中不存在的數據時，get會返回null，而load則拋出異常。
+
+6.2 類(Class)的延遲加載：
+
+◆設置<class>標籤中的lazy=」true」,或是保持默認（即不配置lazy屬性)
+
+◆ 如果lazy的屬性值為true，那麼在使用load方法加載數據時，只有確實用到數據的時候才會發出sql語句；這樣有可能減少系統的開銷。
+
+注意：在class標籤上配置的lazy屬性不會影響到關聯對象!!!
+
+原文網址：https://read01.com/ByOdN.html

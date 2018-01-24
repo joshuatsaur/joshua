@@ -1,0 +1,9 @@
+unix:
+export JAVA_HOME=/usr/jdk/instances/jdk1.6.0_45
+
+export PATH=${PATH}:/home/maven-2.2.1/bin
+
+
+windows:
+set JAVA_HOME=C:\jdk1.6.0_35
+set PATH=%PATH%;C:\maven-2.2.1\bin

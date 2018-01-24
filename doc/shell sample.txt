@@ -1,0 +1,281 @@
+#!/bin/bash
+
+RFAM_ME=`basename $0 .sh`
+export timestr=`date +\%Y\%m\%d\%H\%M\%S`
+export auditlog=/tmp/${RFAM_ME}.log.${timestr}
+echo "AIM Deploy audit log : ${auditlog}"
+
+APPLICATION_NAME=$1
+AIM_ENV=$2
+AIM_VERSION=$3
+ITSM_NUMBER=$4
+FRS_USER=$5
+FRS_PASSWORD=$6
+JANUS_USERNAME=$7
+JANUS_PASSWORD=$8
+AIM_COLLECTION="am-financial-mgmt"
+
+#Start Audit Log
+CRON_USER=`/usr/bin/who am I | awk '{print $1}'`
+echo "`date` [INFO] $CRON_USER start execute AIM Deploy APPLICATION_NAME= ${APPLICATION_NAME}, AIM_VERSION= ${AIM_VERSION}, AIM_ENV= ${AIM_ENV}, ITSM_NUMBER= ${ITSM_NUMBER}" |tee -a ${auditlog}
+
+#check parameter required
+if [ -z ${AIM_VERSION}  ]; then
+    echo "`date` [FATAL] Release version is required" |tee -a ${auditlog}
+	echo "Subject: ${APPLICATION_NAME} ${AIM_ENV} Release ${AIM_VERSION} (build number-${BUILD_NUMBER}) AIM Deploy failed , please check ${auditlog} " | /usr/sbin/sendmail ${EMAIL_ADDRESS}
+	exit 1
+fi
+if [ ${AIM_ENV} == "prod" ] || [ ${AIM_ENV} == "dr" ]; then
+    if [ -z ${ITSM_NUMBER}  ]; then
+    echo "`date` [FATAL] ITSM is required when deploy prd or dr env" |tee -a ${auditlog}
+	echo "Subject: ${APPLICATION_NAME} ${AIM_ENV} Release ${AIM_VERSION} (build number-${BUILD_NUMBER}) AIM Deploy failed , please check ${auditlog} " | /usr/sbin/sendmail ${EMAIL_ADDRESS}
+	exit 1
+	fi
+fi
+
+if [ ${APPLICATION_NAME} == "TFA" ]; then
+    AIM_RU="tfa-app"
+	SEAL_ID="30260"
+	EMAIL_ADDRESS="jpmam_taiwan_itap_fo@jpmchase.com"
+	if [ ${AIM_ENV} == "prod" ]; then
+       BINARY_ENV="prd"
+	elif [ ${AIM_ENV} == "dr" ]; then
+	   BINARY_ENV="bcp"
+	else
+	   BINARY_ENV=${AIM_ENV}
+    fi
+	if [ ${AIM_ENV} == "dev" ] || [ ${AIM_ENV} == "sit" ] || [ ${AIM_ENV} == "uat" ]; then
+	   ENTITLE_ADMIN=am-financial-mgmt-tfa-legacy-adm
+	else
+	   ENTITLE_ADMIN=am-financial-mgmt-tfa-legacy-ops
+	fi
+elif [ ${APPLICATION_NAME} == "JAFFA" ]; then
+    AIM_RU="jaffa-app"
+	SEAL_ID="8630"
+	EMAIL_ADDRESS="AMIT.Jaffa.System@jpmchase.com"
+	if [ ${AIM_ENV} == "dev" ] || [ ${AIM_ENV} == "sit" ] || [ ${AIM_ENV} == "uat" ]; then
+	   ENTITLE_ADMIN=am-financial-mgmt-cs-legacy-adm
+	   BINARY_ENV=${AIM_ENV}
+	else
+	   ENTITLE_ADMIN=am-financial-mgmt-cs-legacy-ops
+	   BINARY_ENV="prd"
+	fi
+elif [ ${APPLICATION_NAME} == "GL" ]; then
+    AIM_RU="oraclegl-app"
+	SEAL_ID="8630"
+	EMAIL_ADDRESS="AMIT.Jaffa.System@jpmchase.com"
+	if [ ${AIM_ENV} == "dev" ] || [ ${AIM_ENV} == "sit" ] || [ ${AIM_ENV} == "uat" ]; then
+	   ENTITLE_ADMIN=am-financial-mgmt-cs-legacy-adm
+	   BINARY_ENV=${AIM_ENV}
+	else
+	   ENTITLE_ADMIN=am-financial-mgmt-cs-legacy-ops
+	   BINARY_ENV="prd"
+	fi
+elif [ ${APPLICATION_NAME} == "PTC" ]; then
+    AIM_RU="ptc-app"
+	SEAL_ID="30262"
+	EMAIL_ADDRESS="AMIT.Jaffa.System@jpmchase.com"
+	if [ ${AIM_ENV} == "dev" ] || [ ${AIM_ENV} == "sit" ] || [ ${AIM_ENV} == "uat" ]; then
+	   ENTITLE_ADMIN=am-financial-mgmt-cs-legacy-adm
+	   BINARY_ENV=${AIM_ENV}
+	else
+	   ENTITLE_ADMIN=am-financial-mgmt-cs-legacy-ops
+	   BINARY_ENV="prd"
+	fi
+fi
+
+if [ ${AIM_ENV} == "dev" ]; then
+    OSINSTANCE="vsia0u1798"
+elif [ ${AIM_ENV} == "sit" ]; then
+    OSINSTANCE="vsia0u1799"
+elif [ ${AIM_ENV} == "uat" ]; then
+    OSINSTANCE="vsia2p5688"
+elif [ ${AIM_ENV} == "prod" ]; then
+    OSINSTANCE="vsia2p5690"
+elif [ ${AIM_ENV} == "dr" ]; then
+    OSINSTANCE="vsia2p5690"
+fi
+
+function check_osi_deploy_status {
+    echo "`date` [INFO] function check_osi_deploy_status start , parm : $1 $2 $3"
+	aim_poll_init_sleep=300
+	aim_poll_sleep=15
+	aim_poll_count=100
+	aim_osig=$1
+	aim_osi=$2
+	aim_fg=$3
+	
+	sleep ${aim_poll_init_sleep}
+	
+	AIM_CMD="aim print osinstancegroup ${aim_osig} --deploystatus filegroup=${aim_fg} deployed=yes maxitems=30"
+	i=1
+	while [ 1 ]; do
+  		aim_status=$(${AIM_CMD})
+  		aim_res=$(echo ${aim_status} | grep -e "^.*${aim_osi}[ ]*yes[ ]*online.*$")
+  		if [ ${#aim_res} -ne 0 ]; then
+    		echo "`date` [INFO] OS instance \"${aim_osi}\" found"
+    		return 0
+  		else
+    		echo "Trial count = $((i))"
+    		if [ $i -eq ${aim_poll_count} ]; then
+      			echo "`date` [FATAL] OS instance \"${aim_osi}\" not found"
+				return 1
+    		fi
+  		fi
+  		i=$((${i} + 1))
+  		sleep ${aim_poll_sleep}
+	done
+}
+
+#Retrive previous build number from aim_build_number_${APPLICATION_NAME}
+ROW_DATA=`grep ${AIM_VERSION}:${AIM_ENV}: /home/jadehkgd/aim_deploy/aim_build_number_${APPLICATION_NAME}`
+if [ -z ${ROW_DATA} ]; then
+    BUILD_NUMBER=1
+else
+    OLD_BUILD_NUMBER=`echo ${ROW_DATA} | awk -F: '{print $3}'`
+	BUILD_NUMBER=$((${OLD_BUILD_NUMBER} + 1))
+fi
+echo "`date` [INFO] build number is ${BUILD_NUMBER}" |tee -a ${auditlog}
+UPDATE_BUILDNUMBER_STRING=${AIM_VERSION}:${AIM_ENV}:${BUILD_NUMBER}
+
+#get artifacts from FRS to temporary location (/tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}) for upload to GFS later
+echo "`date` [INFO] checking temporary folder /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION} exist .." |tee -a ${auditlog}
+if [ ! -d /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}/ ]; then
+    mkdir -p /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}/
+	echo "`date` [INFO] create temporary folder /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION} completed" |tee -a ${auditlog}
+else
+    rm -rf /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}/*
+fi
+
+echo "`date` [INFO] get artifacts from FRS to temporary folder" |tee -a ${auditlog}
+if [ ${APPLICATION_NAME} == "TFA" ]; then
+    /usr/bin/wget --user=${FRS_USER} --password=${FRS_PASSWORD} --no-check-certificate -O /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}/lre-ear-${AIM_VERSION}-${BINARY_ENV}.ear https://repo.jpmchase.net/maven/content/repositories/IMIMAASIAPACIFICTWFO/com/jpmorgan/awm/jfam/lre/lre-ear/${AIM_VERSION}-${BINARY_ENV}/lre-ear-${AIM_VERSION}-${BINARY_ENV}.ear
+	if [ $? -ne 0 ]; then    
+		echo "`date` [FATAL] wget lre-ear-${AIM_VERSION}-${BINARY_ENV}.ear failed.." |tee -a ${auditlog}
+		echo "Subject: ${APPLICATION_NAME} ${AIM_ENV} Release ${AIM_VERSION} (build number-${BUILD_NUMBER}) AIM Deploy failed , please check ${auditlog} " | /usr/sbin/sendmail ${EMAIL_ADDRESS}
+		exit 1
+	fi
+    /usr/bin/wget --user=${FRS_USER} --password=${FRS_PASSWORD} --no-check-certificate -O /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}/lre-batch-${AIM_VERSION}-${BINARY_ENV}.zip https://repo.jpmchase.net/maven/content/repositories/IMIMAASIAPACIFICTWFO/com/jpmorgan/awm/jfam/lre/lre-batch/${AIM_VERSION}/lre-batch-${AIM_VERSION}-${BINARY_ENV}.zip
+	if [ $? -ne 0 ]; then
+		echo "`date` [FATAL] wget lre-batch-${AIM_VERSION}-${BINARY_ENV}.zip failed.." |tee -a ${auditlog}
+		echo "Subject: ${APPLICATION_NAME} ${AIM_ENV} Release ${AIM_VERSION} (build number-${BUILD_NUMBER}) AIM Deploy failed , please check ${auditlog} " | /usr/sbin/sendmail ${EMAIL_ADDRESS}
+		exit 1
+	fi
+elif [ ${APPLICATION_NAME} == "JAFFA" ]; then
+    /usr/bin/wget --user=${FRS_USER} --password=${FRS_PASSWORD} --no-check-certificate -O /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}/jaffa-package-${AIM_VERSION}-${BINARY_ENV}_batch.tar.gz https://repo.jpmchase.net/maven/content/repositories/IMIMAASIAPACIFICJAFFA/com/jpmorgan/am/cs/jaffa/package/jaffa-package/${AIM_VERSION}/jaffa-package-${AIM_VERSION}-${BINARY_ENV}_batch.tar.gz
+	if [ $? -ne 0 ]; then
+		echo "`date` [FATAL] wget jaffa-package-${AIM_VERSION}-${BINARY_ENV}_batch.tar.gz failed.." |tee -a ${auditlog}
+		echo "Subject: ${APPLICATION_NAME} ${AIM_ENV} Release ${AIM_VERSION} (build number-${BUILD_NUMBER}) AIM Deploy failed , please check ${auditlog} " | /usr/sbin/sendmail ${EMAIL_ADDRESS}
+		exit 1
+	fi
+    /usr/bin/wget --user=${FRS_USER} --password=${FRS_PASSWORD} --no-check-certificate -O /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}/jaffa-package-${AIM_VERSION}-${BINARY_ENV}_was_gwt.tar.gz https://repo.jpmchase.net/maven/content/repositories/IMIMAASIAPACIFICJAFFA/com/jpmorgan/am/cs/jaffa/package/jaffa-package/${AIM_VERSION}/jaffa-package-${AIM_VERSION}-${BINARY_ENV}_was_gwt.tar.gz
+	if [ $? -ne 0 ]; then
+		echo "`date` [FATAL] wget jaffa-package-${AIM_VERSION}-${BINARY_ENV}_was_gwt.tar.gz failed.." |tee -a ${auditlog}
+		echo "Subject: ${APPLICATION_NAME} ${AIM_ENV} Release ${AIM_VERSION} (build number-${BUILD_NUMBER}) AIM Deploy failed , please check ${auditlog} " | /usr/sbin/sendmail ${EMAIL_ADDRESS}
+		exit 1
+	fi
+    /usr/bin/wget --user=${FRS_USER} --password=${FRS_PASSWORD} --no-check-certificate -O /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}/jaffa-package-${AIM_VERSION}-${BINARY_ENV}_was_jndi.tar.gz https://repo.jpmchase.net/maven/content/repositories/IMIMAASIAPACIFICJAFFA/com/jpmorgan/am/cs/jaffa/package/jaffa-package/${AIM_VERSION}/jaffa-package-${AIM_VERSION}-${BINARY_ENV}_was_jndi.tar.gz
+	if [ $? -ne 0 ]; then
+		echo "`date` [FATAL] wget jaffa-package-${AIM_VERSION}-${BINARY_ENV}_was_jndi.tar.gz failed.." |tee -a ${auditlog}
+		echo "Subject: ${APPLICATION_NAME} ${AIM_ENV} Release ${AIM_VERSION} (build number-${BUILD_NUMBER}) AIM Deploy failed , please check ${auditlog} " | /usr/sbin/sendmail ${EMAIL_ADDRESS}
+		exit 1
+	fi
+    /usr/bin/wget --user=${FRS_USER} --password=${FRS_PASSWORD} --no-check-certificate -O /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}/jaffa-package-${AIM_VERSION}-${BINARY_ENV}_was_ssi.tar.gz https://repo.jpmchase.net/maven/content/repositories/IMIMAASIAPACIFICJAFFA/com/jpmorgan/am/cs/jaffa/package/jaffa-package/${AIM_VERSION}/jaffa-package-${AIM_VERSION}-${BINARY_ENV}_was_ssi.tar.gz
+	if [ $? -ne 0 ]; then
+		echo "`date` [FATAL] wget jaffa-package-${AIM_VERSION}-${BINARY_ENV}_was_ssi.tar.gz failed.." |tee -a ${auditlog}
+		echo "Subject: ${APPLICATION_NAME} ${AIM_ENV} Release ${AIM_VERSION} (build number-${BUILD_NUMBER}) AIM Deploy failed , please check ${auditlog} " | /usr/sbin/sendmail ${EMAIL_ADDRESS}
+		exit 1
+	fi
+elif [ ${APPLICATION_NAME} == "GL" ]; then
+    /usr/bin/wget --user=${FRS_USER} --password=${FRS_PASSWORD} --no-check-certificate -O /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}/gl-package-${AIM_VERSION}-${BINARY_ENV}.zip https://repo.jpmchase.net/maven/content/repositories/IMIMAASIAPACIFICJAFFA/com/jpmorgan/awm/jfam/gl/gl-package/${AIM_VERSION}/gl-package-${AIM_VERSION}-${BINARY_ENV}.zip
+	if [ $? -ne 0 ]; then
+		echo "`date` [FATAL] wget gl-package-${AIM_VERSION}-${BINARY_ENV}.zip failed.." |tee -a ${auditlog}
+		echo "Subject: ${APPLICATION_NAME} ${AIM_ENV} Release ${AIM_VERSION} (build number-${BUILD_NUMBER}) AIM Deploy failed , please check ${auditlog} " | /usr/sbin/sendmail ${EMAIL_ADDRESS}
+		exit 1
+	fi
+elif [ ${APPLICATION_NAME} == "PTC" ]; then
+    /usr/bin/wget --user=${FRS_USER} --password=${FRS_PASSWORD} --no-check-certificate -O /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}/ptc-package-${AIM_VERSION}-${BINARY_ENV}.zip https://repo.jpmchase.net/maven/content/repositories/IMIMAASIAPACIFICJAFFA/com/jpmorgan/am/cs/ptc/ptc-package/${AIM_VERSION}/ptc-package-${AIM_VERSION}-${BINARY_ENV}.zip
+	if [ $? -ne 0 ]; then
+		echo "`date` [FATAL] wget ptc-package-${AIM_VERSION}-${BINARY_ENV}.zip failed.." |tee -a ${auditlog}
+		echo "Subject: ${APPLICATION_NAME} ${AIM_ENV} Release ${AIM_VERSION} (build number-${BUILD_NUMBER}) AIM Deploy failed , please check ${auditlog} " | /usr/sbin/sendmail ${EMAIL_ADDRESS}
+		exit 1
+	fi
+fi
+
+#execute AIM api to upload artifacts to GFS /aim/gfs/quad/${AIM_COLLECTION}/${AIM_RU}/${AIM_ENV}/${AIM_RU}
+echo "`date` [INFO] Srart GFS create entry --> aim create entry quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_VERSION}-${AIM_ENV}-${BUILD_NUMBER} --sealid ${SEAL_ID}" |tee -a ${auditlog}
+echo "`date` [INFO] Srart upload artifacts to GFS entry --> aim create entry quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_VERSION}-${AIM_ENV}-${BUILD_NUMBER}/${AIM_RU} --sourcepath /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}/ --property type=binary" |tee -a ${auditlog}
+aim login ${JANUS_USERNAME} ${JANUS_PASSWORD}
+aim create entry quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_VERSION}-${AIM_ENV}-${BUILD_NUMBER} --sealid ${SEAL_ID}
+aim create entry quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_VERSION}-${AIM_ENV}-${BUILD_NUMBER}/${AIM_RU} --sourcepath /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}/ --property type=binary
+
+#update the current build number to aim_build_number_${APPLICATION_NAME}
+if [ $? -eq 0 ]; then
+    if [ ${BUILD_NUMBER} == 1 ]; then
+        echo ${UPDATE_BUILDNUMBER_STRING} >> /home/jadehkgd/aim_deploy/aim_build_number_${APPLICATION_NAME}
+    else
+        sed s/${ROW_DATA}/${UPDATE_BUILDNUMBER_STRING}/g /home/jadehkgd/aim_deploy/aim_build_number_${APPLICATION_NAME} > /home/jadehkgd/aim_deploy/aim_build_number_${APPLICATION_NAME}.bk
+        mv /home/jadehkgd/aim_deploy/aim_build_number_${APPLICATION_NAME}.bk /home/jadehkgd/aim_deploy/aim_build_number_${APPLICATION_NAME}
+    fi
+fi
+
+echo "`date` [INFO] start update Quad version link to ${AIM_VERSION}-${AIM_ENV}-${BUILD_NUMBER}" |tee -a ${auditlog}
+if [ ${AIM_ENV} == "dev" ] || [ ${AIM_ENV} == "sit" ] || [ ${AIM_ENV} == "uat" ]; then
+   aim update link quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_ENV} --target quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_VERSION}-${AIM_ENV}-${BUILD_NUMBER}
+   if [ $? -ne 0 ]; then
+       echo "`date` [INFO] quad link not exist , create link ${AIM_VERSION}-${AIM_ENV}-${BUILD_NUMBER}" |tee -a ${auditlog}
+	   aim create link quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_ENV} --target quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_VERSION}-${AIM_ENV}-${BUILD_NUMBER} --entitleadmin ${ENTITLE_ADMIN}
+   fi
+else
+   echo "aim update link quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_ENV} --target quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_VERSION}-${AIM_ENV}-${BUILD_NUMBER} --goodtogoproperty itsm=${ITSM_NUMBER}"
+   aim update link quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_ENV} --target quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_VERSION}-${AIM_ENV}-${BUILD_NUMBER} --goodtogoproperty itsm=${ITSM_NUMBER}
+   if [ $? -ne 0 ]; then
+       echo "`date` [INFO] quad link not exist , create link to ${AIM_VERSION}-${AIM_ENV}-${BUILD_NUMBER}" |tee -a ${auditlog}
+	   aim create link quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_ENV} --target quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_VERSION}-${AIM_ENV}-${BUILD_NUMBER} --entitleadmin ${ENTITLE_ADMIN}
+   fi
+fi
+
+echo "`date` [INFO] start update filegroup ${AIM_COLLECTION}-${AIM_RU}/${AIM_ENV}" |tee -a ${auditlog}
+aim update filegroup ${AIM_COLLECTION}-${AIM_RU}/${AIM_ENV} --unlock
+if [ ${AIM_ENV} == "dev" ] || [ ${AIM_ENV} == "sit" ] || [ ${AIM_ENV} == "uat" ]; then
+    aim update filegroup ${AIM_COLLECTION}-${AIM_RU}/${AIM_ENV} --addentry quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_ENV}
+else
+    aim update filegroup ${AIM_COLLECTION}-${AIM_RU}/${AIM_ENV} --addentry quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_ENV} --goodtogoproperty itsm=${ITSM_NUMBER}
+fi
+aim update filegroup ${AIM_COLLECTION}-${AIM_RU}/${AIM_ENV} --lock
+
+#if [ ${BUILD_NUMBER} -gt 1 ]; then
+#   echo "`date` [INFO] remove old quad entry quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_VERSION}-${AIM_ENV}-${OLD_BUILD_NUMBER}/${AIM_RU}" |tee -a ${auditlog}
+#   aim delete entry quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_VERSION}-${AIM_ENV}-${OLD_BUILD_NUMBER}/${AIM_RU}
+#   aim purge entry quad:/${AIM_COLLECTION}/${AIM_RU}/${AIM_VERSION}-${AIM_ENV}-${OLD_BUILD_NUMBER}/${AIM_RU}
+#fi
+
+echo "`date` [WARNING] start AIM Synchronize, it will take times, please be patient" |tee -a ${auditlog}
+#aim sync --osinstance ${OSINSTANCE}
+check_osi_deploy_status ${AIM_COLLECTION}-${AIM_RU}/${AIM_ENV} ${OSINSTANCE} ${AIM_COLLECTION}-${AIM_RU}/${AIM_ENV}
+if [ $? == 0 ]; then
+    echo "`date` [INFO] start copy artifacts to NAS" |tee -a ${auditlog}
+    if [ ${AIM_ENV} == "dev" ] || [ ${AIM_ENV} == "sit" ] || [ ${AIM_ENV} == "uat" ]; then
+        aim start processinstance exec:/${AIM_COLLECTION}/${AIM_RU}/deploy-${AIM_ENV}/@deploy-${AIM_ENV} --osinstance ${OSINSTANCE} --wait
+    else
+        aim start processinstance exec:/${AIM_COLLECTION}/${AIM_RU}/deploy-${AIM_ENV}/@deploy-${AIM_ENV} --osinstance ${OSINSTANCE} --wait --goodtogoproperty itsm=${ITSM_NUMBER}
+    fi
+else 
+    echo "`date` [FATAL] AIM Synchronize failed" |tee -a ${auditlog}
+    echo "Subject: ${APPLICATION_NAME} ${AIM_ENV} Release ${AIM_VERSION} (build number-${BUILD_NUMBER}) AIM Synchronize failed " | /usr/sbin/sendmail ${EMAIL_ADDRESS}
+	aim-util upload logs --osinstance ${OSINSTANCE}
+    aim logout
+    exit 1
+fi
+aim-util upload logs --osinstance ${OSINSTANCE}
+#aim-util upload logs
+aim logout
+
+#remove artifacts from temp folder
+echo "`date` [INFO] remove artifacts from /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}/ .." |tee -a ${auditlog}
+rm -rf /tmp/aim_tmp/${SEAL_ID}_${AIM_RU}/${AIM_ENV}/${AIM_VERSION}/*
+
+#send email 
+#echo "Subject: ${APPLICATION_NAME} ${AIM_ENV} Release ${AIM_VERSION} (build number-${BUILD_NUMBER}) AIM Deploy success" | /usr/sbin/sendmail ${EMAIL_ADDRESS}
+
+echo "`date` [INFO] AIM JOB ${APPLICATION_NAME} ${AIM_VERSION} ${AIM_ENV} completed, please check email to verify deploy success or not !!" |tee -a ${auditlog}
